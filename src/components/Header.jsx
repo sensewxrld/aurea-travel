@@ -1,11 +1,12 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import logo from "../assets/logo-aurea.png";
 
 function Header({ user, onClientAreaClick }) {
   return (
     <header className="md-header">
       <div className="md-header-inner">
-        <div className="md-brand">
+        <Link to="/" className="md-brand">
           <img
             src={logo}
             alt="Auréa Travel"
@@ -14,7 +15,7 @@ function Header({ user, onClientAreaClick }) {
           <div className="md-brand-text">
             <span className="md-brand-name">Auréa Travel</span>
           </div>
-        </div>
+        </Link>
         <button
           className="md-header-ghost-button"
           type="button"
