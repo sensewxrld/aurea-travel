@@ -20,36 +20,15 @@ import CheckoutScreen from "./screens/CheckoutScreen.jsx";
 import PurchaseConfirmationScreen from "./screens/PurchaseConfirmationScreen.jsx";
 import TripReviewScreen from "./screens/TripReviewScreen.jsx";
 import { LanguageProvider } from "./contexts/LanguageContext.jsx";
+import { useAuth } from "./contexts/AuthContext";
 
 function App() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { currentUser } = useAuth();
   const [favorites, setFavorites] = useState([]);
-  const [user, setUser] = useState(null);
   const [reservations, setReservations] = useState([]);
   const [isNavHidden, setIsNavHidden] = useState(false);
-
-  useEffect(() => {
-    try {
-      const storedUser = window.localStorage.getItem("meudestino_user");
-      if (storedUser) {
-        setUser(JSON.parse(storedUser));
-      }
-    } catch {
-      setUser(null);
-    }
-  }, []);
-
-  useEffect(() => {
-    try {
-      if (user) {
-        window.localStorage.setItem("meudestino_user", JSON.stringify(user));
-      } else {
-        window.localStorage.removeItem("meudestino_user");
-      }
-    } catch {
-    }
-  }, [user]);
 
   useEffect(() => {
     try {
@@ -100,77 +79,6 @@ function App() {
     });
   };
 
-  const handleLogin = (credentials) => {
-    const identifier = credentials.identifier?.trim();
-    if (!identifier) return;
-    const isEmail = identifier.includes("@");
-    const baseName = isEmail ? identifier.split("@")[0] : identifier;
-    const displayName = credentials.name?.trim() || baseName || "Viajante";
-    setUser((prev) => ({
-      name: displayName,
-      email: isEmail ? identifier : prev?.email || "",
-      phone: isEmail ? prev?.phone || "" : identifier,
-      password: credentials.password || prev?.password || "",
-      language: prev?.language || "Português (Brasil)",
-      currency: prev?.currency || "BRL - Real brasileiro",
-      notifications:
-        prev?.notifications || {
-          email: true,
-          sms: false,
-          push: true,
-        },
-      theme: prev?.theme || "Claro",
-      documentId: prev?.documentId || "",
-    }));
-    navigate("/perfil");
-  };
-
-  const handleSignup = (payload) => {
-    const name = payload.name?.trim();
-    const email = payload.email?.trim();
-    const phone = payload.phone?.trim();
-    if (!name || !email || !phone) return;
-    setUser({
-      name,
-      email,
-      phone,
-      password: payload.password,
-      language: "Português (Brasil)",
-      currency: "BRL - Real brasileiro",
-      notifications: {
-        email: true,
-        sms: false,
-        push: true,
-      },
-      theme: "Claro",
-      documentId: "",
-    });
-    navigate("/perfil");
-  };
-
-  const handleLogout = () => {
-    setUser(null);
-    navigate("/");
-  };
-
-  const handleUpdateUser = (updates) => {
-    setUser((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        ...updates,
-        notifications: updates.notifications || prev.notifications,
-      };
-    });
-  };
-
-  const handleDeleteAccount = () => {
-    setUser(null);
-    setFavorites([]);
-    setReservations([]);
-    navigate("/");
-  };
-
   const handleConfirmReservation = (reservation) => {
     const fullReservation = {
       id: String(Date.now()),
@@ -188,7 +96,7 @@ function App() {
   };
 
   const handleClientAreaClick = () => {
-    if (user) {
+    if (currentUser) {
       navigate("/perfil");
     } else {
       navigate("/login");
@@ -199,7 +107,7 @@ function App() {
     <LanguageProvider>
       <div className={`md-app ${isNavHidden ? 'md-nav-hidden' : ''}`}>
         <ScrollToTop />
-        {!isNavHidden && <Header user={user} onClientAreaClick={handleClientAreaClick} />}
+        {!isNavHidden && <Header onClientAreaClick={handleClientAreaClick} />}
         <main className="md-main">
           <div className="md-shell">
             <div key={path} className="md-page md-page-enter">
@@ -246,23 +154,19 @@ function App() {
                   path="/perfil"
                   element={
                     <ProfileScreen
-                      user={user}
                       favoritesCount={favorites.length}
                       reservationsCount={reservations.length}
                       reservations={reservations}
-                      onLogout={handleLogout}
-                      onUpdateUser={handleUpdateUser}
-                      onDeleteAccount={handleDeleteAccount}
                     />
                   }
                 />
                 <Route
                   path="/login"
-                  element={<LoginScreen onLogin={handleLogin} user={user} />}
+                  element={<LoginScreen />}
                 />
                 <Route
                   path="/cadastro"
-                  element={<SignupScreen onSignup={handleSignup} user={user} />}
+                  element={<SignupScreen />}
                 />
                 <Route
                   path="/destinos/:id"
@@ -328,7 +232,6 @@ function App() {
                   path="/checkout"
                   element={
                     <CheckoutScreen
-                      user={user}
                       onConfirmReservation={(payload) =>
                         handleConfirmReservation({
                           ...payload,

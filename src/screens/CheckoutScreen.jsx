@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
 import CustomSelect from "../components/CustomSelect.jsx";
 
 const monthNames = [
@@ -64,9 +65,15 @@ const isWithinRange = (date, start, end) => {
   return time >= start.getTime() && time <= end.getTime();
 };
 
-function CheckoutScreen({ user, onConfirmReservation }) {
+function CheckoutScreen({ onConfirmReservation }) {
+  const { currentUser } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  
+  const user = currentUser ? {
+    name: currentUser.displayName || currentUser.email.split('@')[0],
+    ...currentUser
+  } : null;
 
   const destination = useMemo(() => {
     if (location.state && location.state.destination) {

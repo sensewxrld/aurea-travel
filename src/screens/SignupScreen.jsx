@@ -1,8 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
+import { auth } from "../services/firebase";
+import { useAuth } from "../contexts/AuthContext";
 
-function SignupScreen({ user, onSignup }) {
+function SignupScreen() {
   const navigate = useNavigate();
+  const { currentUser } = useAuth();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -43,12 +47,12 @@ function SignupScreen({ user, onSignup }) {
     digits.length === 10 || digits.length === 11;
 
   useEffect(() => {
-    if (user) {
+    if (currentUser) {
       navigate("/perfil");
     }
-  }, [user, navigate]);
+  }, [currentUser, navigate]);
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
     setError("");
     setNameError("");
@@ -105,15 +109,25 @@ function SignupScreen({ user, onSignup }) {
     }
 
     setIsSubmitting(true);
-    setTimeout(() => {
-      onSignup({
-        name: trimmedName,
-        email: trimmedEmail,
-        phone: trimmedPhone,
-        password,
+    
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, trimmedEmail, password);
+      await updateProfile(userCredential.user, {
+        displayName: trimmedName
       });
+      // Navigation handled by useEffect
+    } catch (err) {
+      console.error(err);
+      if (err.code === 'auth/email-already-in-use') {
+        setEmailError("Este email já está em uso.");
+      } else if (err.code === 'auth/weak-password') {
+        setPasswordError("A senha é muito fraca.");
+      } else {
+        setError("Falha ao criar conta. Tente novamente.");
+      }
+    } finally {
       setIsSubmitting(false);
-    }, 400);
+    }
   };
 
   return (
@@ -128,6 +142,7 @@ function SignupScreen({ user, onSignup }) {
       </div>
       <div className="md-auth-card">
         <form onSubmit={handleSubmit} className="md-auth-form">
+          {error && <div className="md-alert-error" style={{marginBottom: '1rem', color: 'var(--md-color-error)'}}>{error}</div>}
           <div className="md-field-group">
             <label className="md-field-label" htmlFor="signup-name">
               Nome completo
@@ -200,9 +215,9 @@ function SignupScreen({ user, onSignup }) {
               placeholder="(11) 99999-9999"
               value={phone}
               onChange={(event) => {
-                const formatted = formatPhone(event.target.value);
-                setPhone(formatted);
-                const digits = onlyDigits(formatted);
+                const nextValue = formatPhone(event.target.value);
+                setPhone(nextValue);
+                const digits = onlyDigits(nextValue);
                 if (!digits) {
                   setPhoneError("Informe um telefone com DDD.");
                 } else if (!isValidPhoneDigits(digits)) {
@@ -214,7 +229,6 @@ function SignupScreen({ user, onSignup }) {
                 }
               }}
               autoComplete="tel"
-              inputMode="tel"
             />
             {phoneError && <div className="md-field-error">{phoneError}</div>}
           </div>
@@ -230,7 +244,7 @@ function SignupScreen({ user, onSignup }) {
                   : "md-field-input"
               }
               type="password"
-              placeholder="Crie uma senha segura"
+              placeholder="Mínimo de 6 caracteres"
               value={password}
               onChange={(event) => {
                 const nextValue = event.target.value;
@@ -240,11 +254,6 @@ function SignupScreen({ user, onSignup }) {
                 } else {
                   setPasswordError("");
                 }
-                if (confirmPassword && nextValue !== confirmPassword) {
-                  setConfirmPasswordError("As senhas não conferem.");
-                } else if (confirmPassword) {
-                  setConfirmPasswordError("");
-                }
               }}
               autoComplete="new-password"
             />
@@ -253,23 +262,23 @@ function SignupScreen({ user, onSignup }) {
             )}
           </div>
           <div className="md-field-group">
-            <label className="md-field-label" htmlFor="signup-password-confirm">
+            <label className="md-field-label" htmlFor="signup-confirm">
               Confirmar senha
             </label>
             <input
-              id="signup-password-confirm"
+              id="signup-confirm"
               className={
                 confirmPasswordError
                   ? "md-field-input md-field-input-error"
                   : "md-field-input"
               }
               type="password"
-              placeholder="Repita a senha"
+              placeholder="Digite a senha novamente"
               value={confirmPassword}
               onChange={(event) => {
                 const nextValue = event.target.value;
                 setConfirmPassword(nextValue);
-                if (password && nextValue !== password) {
+                if (nextValue !== password) {
                   setConfirmPasswordError("As senhas não conferem.");
                 } else {
                   setConfirmPasswordError("");
@@ -281,25 +290,25 @@ function SignupScreen({ user, onSignup }) {
               <div className="md-field-error">{confirmPasswordError}</div>
             )}
           </div>
-          <label className="md-checkbox-row">
-            <input
-              type="checkbox"
-              checked={acceptTerms}
-              onChange={(event) => setAcceptTerms(event.target.checked)}
-            />
-            <span>
-              Li e aceito os{" "}
-              <span className="md-link-inline">termos de uso</span> e a{" "}
-              <span className="md-link-inline">política de privacidade</span>.
-            </span>
-          </label>
-          {error && <div className="md-field-error">{error}</div>}
+          <div className="md-field-checkbox">
+            <label className="md-checkbox-label">
+              <input
+                type="checkbox"
+                className="md-checkbox-input"
+                checked={acceptTerms}
+                onChange={(e) => setAcceptTerms(e.target.checked)}
+              />
+              <span className="md-checkbox-text">
+                Li e concordo com os Termos de Uso e Política de Privacidade.
+              </span>
+            </label>
+          </div>
           <button
             type="submit"
             className="md-primary-button md-auth-submit"
             disabled={isSubmitting}
           >
-            <span>Criar conta</span>
+            <span>{isSubmitting ? "Criando conta..." : "Criar conta"}</span>
           </button>
         </form>
         <div className="md-auth-hint">
@@ -309,7 +318,7 @@ function SignupScreen({ user, onSignup }) {
             className="md-link-button"
             onClick={() => navigate("/login")}
           >
-            Entrar
+            Fazer login
           </button>
         </div>
       </div>

@@ -2,6 +2,9 @@ import React, { useMemo, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import CustomSelect from "../components/CustomSelect.jsx";
 import { useLanguage } from "../contexts/LanguageContext.jsx";
+import { signOut, updateProfile, updateEmail, updatePassword, deleteUser, reauthenticateWithCredential, EmailAuthProvider } from "firebase/auth";
+import { auth } from "../services/firebase";
+import { useAuth } from "../contexts/AuthContext";
 import {
   IconUser,
   IconHeart,
@@ -55,17 +58,29 @@ function ProfileAvatar({ user, initials }) {
 }
 
 function ProfileScreen({
-  user,
   favoritesCount,
   reservationsCount,
   reservations = [],
-  onLogout,
   onUpdateUser,
   onDeleteAccount,
 }) {
   const navigate = useNavigate();
   const { language, changeLanguage, t } = useLanguage();
-  const isLoggedIn = !!user;
+  const { currentUser } = useAuth();
+  const isLoggedIn = !!currentUser;
+  
+  const user = currentUser ? {
+    name: currentUser.displayName,
+    email: currentUser.email,
+    photoUrl: currentUser.photoURL,
+    phone: currentUser.phoneNumber,
+    // Provide defaults for other fields if needed or load from DB
+    documentId: "",
+    currency: "BRL - Real brasileiro",
+    notifications: { email: true, sms: false, push: true },
+    theme: "Claro"
+  } : null;
+
   const initials = useMemo(() => {
     if (user && user.name) {
       return user.name
@@ -191,194 +206,131 @@ function ProfileScreen({
     return true;
   };
 
-  const handleProfileSubmit = (event) => {
+  const handleProfileSubmit = async (event) => {
     event.preventDefault();
-    if (!onUpdateUser || !user) return;
+    if (!currentUser) return;
     const nextErrors = {
       name: "",
       email: "",
       phone: "",
       documentId: "",
     };
-    const trimmedName = profileForm.name.trim();
-    const trimmedEmail = profileForm.email.trim();
-    const phoneDigits = onlyDigits(profileForm.phone);
-    const documentDigits = onlyDigits(profileForm.documentId);
     let hasError = false;
 
-    if (!trimmedName) {
+    if (!profileForm.name.trim()) {
       nextErrors.name = "Informe seu nome completo.";
       hasError = true;
     }
 
-    if (!trimmedEmail) {
+    if (!profileForm.email.trim()) {
       nextErrors.email = "Informe seu email.";
       hasError = true;
-    } else if (!isValidEmail(trimmedEmail)) {
+    } else if (!isValidEmail(profileForm.email)) {
       nextErrors.email = "Digite um email válido.";
       hasError = true;
     }
 
-    if (phoneDigits && !isValidPhoneDigits(phoneDigits)) {
-      nextErrors.phone = "Digite um telefone com DDD (10 ou 11 dígitos).";
+    const phoneDigits = onlyDigits(profileForm.phone);
+    if (profileForm.phone && !isValidPhoneDigits(phoneDigits)) {
+      nextErrors.phone = "Telefone inválido.";
       hasError = true;
     }
 
-    if (documentDigits && !isValidCpfDigits(documentDigits)) {
-      nextErrors.documentId = "Digite um CPF válido (11 dígitos).";
+    const cpfDigits = onlyDigits(profileForm.documentId);
+    if (profileForm.documentId && !isValidCpfDigits(cpfDigits)) {
+      nextErrors.documentId = "CPF inválido.";
       hasError = true;
     }
 
     setProfileErrors(nextErrors);
+    if (hasError) return;
 
-    if (hasError) {
-      return;
-    }
-
-    onUpdateUser({
-      name: trimmedName,
-      email: trimmedEmail,
-      phone: profileForm.phone,
-      documentId: profileForm.documentId,
-    });
-  };
-
-  useEffect(() => {
-    setSettingsForm((prev) => ({
-      ...prev,
-      language: language,
-    }));
-  }, [language]);
-
-  const handleSettingsChange = (field, value) => {
-    setSettingsForm((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-
-    if (field === "language") {
-      changeLanguage(value);
-    }
-
-    if (!onUpdateUser || !user) return;
-    if (field === "notifications") {
-      onUpdateUser({
-        notifications: value,
-      });
-    } else {
-      onUpdateUser({
-        [field]: value,
-      });
-    }
-  };
-
-  const handleNotificationToggle = (key) => {
-    setSettingsForm((prev) => {
-      const nextNotifications = {
-        ...prev.notifications,
-        [key]: !prev.notifications[key],
-      };
-      if (onUpdateUser && user) {
-        onUpdateUser({
-          notifications: nextNotifications,
+    try {
+      if (profileForm.name !== currentUser.displayName) {
+        await updateProfile(currentUser, {
+          displayName: profileForm.name,
         });
       }
-      return {
-        ...prev,
-        notifications: nextNotifications,
-      };
-    });
+
+      if (profileForm.email !== currentUser.email) {
+        await updateEmail(currentUser, profileForm.email);
+      }
+      
+      alert("Dados atualizados com sucesso!");
+    } catch (error) {
+      console.error("Erro ao atualizar perfil:", error);
+      if (error.code === 'auth/requires-recent-login') {
+        alert("Para alterar o email, é necessário fazer login novamente por segurança.");
+      } else {
+        alert("Erro ao atualizar perfil: " + error.message);
+      }
+    }
   };
 
-  const handleAddCard = () => {
-    setCardFormError("");
-    setCardForm((prev) => ({
-      holderName: user?.name || prev.holderName || "",
-      number: "",
-      expiry: "",
-      cvv: "",
-    }));
-    setActiveView("addCard");
+  const handleSettingsChange = (field, value) => {
+    setSettingsForm((prev) => {
+      const next = { ...prev, [field]: value };
+      if (field === "language") {
+        changeLanguage(value);
+      }
+      return next;
+    });
   };
 
   const handleRemoveCard = (cardId) => {
-    setSavedCards((prev) => prev.filter((card) => card.id !== cardId));
+    setSavedCards((prev) => prev.filter((c) => c.id !== cardId));
   };
 
-  const handleCardFormChange = (field, value) => {
-    if (field === "number") {
-      setCardForm((prev) => ({
-        ...prev,
-        number: formatCardNumber(value),
-      }));
-      return;
-    }
-    if (field === "expiry") {
-      setCardForm((prev) => ({
-        ...prev,
-        expiry: formatExpiry(value),
-      }));
-      return;
-    }
-    if (field === "cvv") {
-      setCardForm((prev) => ({
-        ...prev,
-        cvv: onlyDigits(value).slice(0, 4),
-      }));
-      return;
-    }
-    setCardForm((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-  };
-
-  const handleCardFormSubmit = (event) => {
-    event.preventDefault();
-    const trimmedName = cardForm.holderName.trim();
-    if (!trimmedName) {
-      setCardFormError("Informe o nome impresso no cartão.");
-      return;
-    }
-    if (!isValidCardNumber(cardForm.number)) {
-      setCardFormError("Digite um número de cartão válido.");
+  const handleAddCard = (e) => {
+    e.preventDefault();
+    setCardFormError("");
+    const numberDigits = onlyDigits(cardForm.number);
+    if (!isValidCardNumber(numberDigits)) {
+      setCardFormError("Número do cartão inválido.");
       return;
     }
     if (!isValidExpiry(cardForm.expiry)) {
-      setCardFormError("Digite uma validade no formato MM/AA.");
+      setCardFormError("Validade inválida.");
       return;
     }
-    if (!/^\d{3,4}$/.test(onlyDigits(cardForm.cvv))) {
-      setCardFormError("Digite o código de segurança com 3 ou 4 dígitos.");
+    if (cardForm.cvv.length < 3) {
+      setCardFormError("CVV inválido.");
+      return;
+    }
+    if (!cardForm.holderName.trim()) {
+      setCardFormError("Nome impresso obrigatório.");
       return;
     }
 
-    const digits = onlyDigits(cardForm.number);
-    const last4 = digits.slice(-4) || "0000";
-    let brand = "Cartão";
-    if (digits.startsWith("4")) {
-      brand = "Visa";
-    } else if (digits.startsWith("5")) {
-      brand = "Mastercard";
-    }
-    const label = `${brand} final ${last4}`;
-
-    setSavedCards((prev) => {
-      const nextIndex = prev.length + 1;
-      return [...prev, { id: `card-${nextIndex}`, label }];
+    const newCard = {
+      id: `card-${Date.now()}`,
+      label: `Cartão final ${cardForm.number.slice(-4)}`,
+    };
+    setSavedCards((prev) => [...prev, newCard]);
+    setCardForm({
+      holderName: user?.name || "",
+      number: "",
+      expiry: "",
+      cvv: "",
     });
-    setCardFormError("");
     setActiveView("payments");
   };
 
-  const handleSecuritySubmit = (event) => {
-    event.preventDefault();
-    if (!user || !onUpdateUser) return;
-    if (!securityState.newPassword || !securityState.confirmPassword) {
+  const handleSecuritySubmit = async (e) => {
+    e.preventDefault();
+    setSecurityState((prev) => ({ ...prev, error: "", success: "" }));
+
+    if (!securityState.currentPassword) {
       setSecurityState((prev) => ({
         ...prev,
-        error: "Preencha a nova senha e a confirmação.",
-        success: "",
+        error: "Digite sua senha atual.",
+      }));
+      return;
+    }
+    if (securityState.newPassword.length < 6) {
+      setSecurityState((prev) => ({
+        ...prev,
+        error: "A nova senha deve ter no mínimo 6 caracteres.",
       }));
       return;
     }
@@ -386,27 +338,63 @@ function ProfileScreen({
       setSecurityState((prev) => ({
         ...prev,
         error: "As senhas não conferem.",
-        success: "",
       }));
       return;
     }
-    setSecurityState((prev) => ({
-      ...prev,
-      error: "",
-      success: "Senha atualizada com sucesso.",
-    }));
-    onUpdateUser({
-      password: securityState.newPassword,
-    });
+
+    try {
+      const credential = EmailAuthProvider.credential(currentUser.email, securityState.currentPassword);
+      await reauthenticateWithCredential(currentUser, credential);
+      await updatePassword(currentUser, securityState.newPassword);
+      
+      setSecurityState((prev) => ({
+        ...prev,
+        currentPassword: "",
+        newPassword: "",
+        confirmPassword: "",
+        success: "Senha alterada com sucesso!",
+      }));
+    } catch (error) {
+      console.error("Erro ao alterar senha:", error);
+      let errorMessage = "Erro ao alterar senha.";
+      if (error.code === 'auth/wrong-password') {
+        errorMessage = "Senha atual incorreta.";
+      } else if (error.code === 'auth/requires-recent-login') {
+        errorMessage = "Por favor, faça login novamente para alterar sua senha.";
+      }
+      
+      setSecurityState((prev) => ({
+        ...prev,
+        error: errorMessage,
+      }));
+    }
   };
 
-  const handleDeleteAccountClick = () => {
-    if (!onDeleteAccount) return;
+  const handleDeleteAccountClick = async () => {
     const confirmed = window.confirm(
       "Tem certeza que deseja excluir sua conta? Esta ação não pode ser desfeita."
     );
     if (confirmed) {
-      onDeleteAccount();
+      try {
+        await deleteUser(currentUser);
+        navigate("/");
+      } catch (error) {
+        console.error("Erro ao excluir conta:", error);
+        if (error.code === 'auth/requires-recent-login') {
+          alert("Para excluir sua conta, é necessário fazer login novamente por segurança.");
+        } else {
+          alert("Erro ao excluir conta: " + error.message);
+        }
+      }
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      navigate("/login");
+    } catch (error) {
+      console.error("Error signing out:", error);
     }
   };
 
@@ -452,22 +440,31 @@ function ProfileScreen({
 
           <div className="md-auth-features">
             <div className="md-auth-feature">
-              <span className="md-auth-feature-icon">
-                <IconBriefcase width={18} height={18} />
-              </span>
-              <span>Viagens</span>
+              <div className="md-auth-feature-icon">
+                <IconBriefcase width={20} height={20} />
+              </div>
+              <div className="md-auth-feature-text">
+                <strong>Gerencie suas viagens</strong>
+                <span>Acesse passagens, reservas e roteiros em um só lugar.</span>
+              </div>
             </div>
             <div className="md-auth-feature">
-              <span className="md-auth-feature-icon">
-                <IconHeart width={18} height={18} />
-              </span>
-              <span>Favoritos</span>
+              <div className="md-auth-feature-icon">
+                <IconHeart width={20} height={20} />
+              </div>
+              <div className="md-auth-feature-text">
+                <strong>Salve seus favoritos</strong>
+                <span>Crie listas de desejos para suas próximas aventuras.</span>
+              </div>
             </div>
             <div className="md-auth-feature">
-              <span className="md-auth-feature-icon">
-                <IconShield width={18} height={18} />
-              </span>
-              <span>Segurança</span>
+              <div className="md-auth-feature-icon">
+                <IconBell width={20} height={20} />
+              </div>
+              <div className="md-auth-feature-text">
+                <strong>Receba ofertas exclusivas</strong>
+                <span>Seja o primeiro a saber sobre promoções e descontos.</span>
+              </div>
             </div>
           </div>
         </div>
@@ -483,7 +480,7 @@ function ProfileScreen({
     setActiveView("menu");
   };
 
-  const menuSections = useMemo(() => [
+  const menuSections = [
     {
       id: "section-account",
       title: t("menu_section_account"),
@@ -564,7 +561,7 @@ function ProfileScreen({
         },
       ],
     },
-  ], [t]);
+  ];
 
   const renderMenu = () => {
     return (
@@ -602,7 +599,7 @@ function ProfileScreen({
             <button
               type="button"
               className="md-profile-menu-item md-profile-menu-item-danger"
-              onClick={onLogout}
+              onClick={handleLogout}
             >
               <div className="md-profile-menu-left">
                 <span className="md-profile-menu-icon">
@@ -691,18 +688,16 @@ function ProfileScreen({
                   ? "md-field-input md-field-input-error"
                   : "md-field-input"
               }
+              type="email"
               value={profileForm.email}
               onChange={(event) =>
                 setProfileForm((prev) => {
                   const nextValue = event.target.value;
-                  const trimmed = nextValue.trim();
                   setProfileErrors((prevErrors) => ({
                     ...prevErrors,
-                    email: !trimmed
-                      ? "Informe seu email."
-                      : !isValidEmail(trimmed)
-                      ? "Digite um email válido."
-                      : "",
+                    email: isValidEmail(nextValue)
+                      ? ""
+                      : "Email inválido.",
                   }));
                   return {
                     ...prev,
@@ -726,24 +721,15 @@ function ProfileScreen({
                   ? "md-field-input md-field-input-error"
                   : "md-field-input"
               }
+              type="tel"
               value={profileForm.phone}
-              onChange={(event) =>
-                setProfileForm((prev) => {
-                  const formatted = formatPhone(event.target.value);
-                  const digits = onlyDigits(formatted);
-                  setProfileErrors((prevErrors) => ({
-                    ...prevErrors,
-                    phone:
-                      digits && !isValidPhoneDigits(digits)
-                        ? "Digite um telefone com DDD (10 ou 11 dígitos)."
-                        : "",
-                  }));
-                  return {
-                    ...prev,
-                    phone: formatted,
-                  };
-                })
-              }
+              onChange={(event) => {
+                const nextValue = formatPhone(event.target.value);
+                setProfileForm((prev) => ({
+                  ...prev,
+                  phone: nextValue,
+                }));
+              }}
             />
             {profileErrors.phone && (
               <div className="md-field-error">{profileErrors.phone}</div>
@@ -751,7 +737,7 @@ function ProfileScreen({
           </div>
           <div className="md-field-group">
             <label className="md-field-label" htmlFor="profile-document">
-              {t("personal_data_document_label")}
+              {t("personal_data_cpf_label")}
             </label>
             <input
               id="profile-document"
@@ -760,25 +746,16 @@ function ProfileScreen({
                   ? "md-field-input md-field-input-error"
                   : "md-field-input"
               }
-              placeholder="CPF (apenas para demonstração)"
+              type="text"
               value={profileForm.documentId}
-              onChange={(event) =>
-                setProfileForm((prev) => {
-                  const formatted = formatCpf(event.target.value);
-                  const digits = onlyDigits(formatted);
-                  setProfileErrors((prevErrors) => ({
-                    ...prevErrors,
-                    documentId:
-                      digits && !isValidCpfDigits(digits)
-                        ? "Digite um CPF válido (11 dígitos)."
-                        : "",
-                  }));
-                  return {
-                    ...prev,
-                    documentId: formatted,
-                  };
-                })
-              }
+              onChange={(event) => {
+                const nextValue = formatCpf(event.target.value);
+                setProfileForm((prev) => ({
+                  ...prev,
+                  documentId: nextValue,
+                }));
+              }}
+              placeholder="000.000.000-00"
             />
             {profileErrors.documentId && (
               <div className="md-field-error">{profileErrors.documentId}</div>
@@ -786,7 +763,14 @@ function ProfileScreen({
           </div>
           <div className="md-profile-section-footer">
             <button type="submit" className="md-primary-button">
-              Salvar alterações
+              {t("personal_data_save_button")}
+            </button>
+            <button
+              type="button"
+              className="md-details-secondary md-profile-delete-btn"
+              onClick={handleDeleteAccountClick}
+            >
+              {t("personal_data_delete_account")}
             </button>
           </div>
         </form>
@@ -897,7 +881,7 @@ function ProfileScreen({
               <button
                 type="button"
                 className="md-primary-button md-profile-add-btn"
-                onClick={handleAddCard}
+                onClick={() => setActiveView("addCard")}
               >
                 Adicionar novo cartão
               </button>
@@ -909,97 +893,98 @@ function ProfileScreen({
 
     if (activeView === "addCard") {
       return (
-        <div className="md-profile-section-card">
+        <form onSubmit={handleAddCard} className="md-profile-section-card">
           <div className="md-profile-section-header">
             <div>
               <div className="md-profile-section-title">Adicionar cartão</div>
               <div className="md-profile-section-subtitle">
-                Informe os dados do cartão de crédito usado com mais frequência.
+                Preencha os dados do cartão de crédito.
               </div>
             </div>
           </div>
-          <form onSubmit={handleCardFormSubmit}>
-            <div className="md-field-group">
-              <label className="md-field-label" htmlFor="profile-card-holder">
-                Nome impresso no cartão
-              </label>
+          <div className="md-field-group">
+            <label className="md-field-label">Nome no cartão</label>
+            <input
+              type="text"
+              className="md-field-input"
+              value={cardForm.holderName}
+              onChange={(e) =>
+                setCardForm((p) => ({ ...p, holderName: e.target.value }))
+              }
+              placeholder="Como impresso no cartão"
+            />
+          </div>
+          <div className="md-field-group">
+            <label className="md-field-label">Número do cartão</label>
+            <div className="md-input-with-icon">
+              <span className="md-input-icon">
+                <IconCreditCard width={16} height={16} />
+              </span>
               <input
-                id="profile-card-holder"
-                className="md-field-input"
                 type="text"
-                value={cardForm.holderName}
-                onChange={(event) =>
-                  handleCardFormChange("holderName", event.target.value)
-                }
-              />
-            </div>
-            <div className="md-field-group">
-              <label className="md-field-label" htmlFor="profile-card-number">
-                Número do cartão
-              </label>
-              <input
-                id="profile-card-number"
-                className="md-field-input"
-                type="text"
-                inputMode="numeric"
+                className="md-field-input md-input-pl"
                 value={cardForm.number}
-                onChange={(event) =>
-                  handleCardFormChange("number", event.target.value)
+                onChange={(e) =>
+                  setCardForm((p) => ({
+                    ...p,
+                    number: formatCardNumber(e.target.value),
+                  }))
                 }
+                placeholder="0000 0000 0000 0000"
+                maxLength={23}
               />
             </div>
-            <div className="md-field-inline">
-              <div className="md-field-group">
-                <label className="md-field-label" htmlFor="profile-card-expiry">
-                  Validade (MM/AA)
-                </label>
-                <input
-                  id="profile-card-expiry"
-                  className="md-field-input"
-                  type="text"
-                  inputMode="numeric"
-                  value={cardForm.expiry}
-                  onChange={(event) =>
-                    handleCardFormChange("expiry", event.target.value)
-                  }
-                />
-              </div>
-              <div className="md-field-group">
-                <label className="md-field-label" htmlFor="profile-card-cvv">
-                  Código de segurança
-                </label>
-                <input
-                  id="profile-card-cvv"
-                  className="md-field-input"
-                  type="password"
-                  inputMode="numeric"
-                  value={cardForm.cvv}
-                  onChange={(event) =>
-                    handleCardFormChange("cvv", event.target.value)
-                  }
-                />
-              </div>
+          </div>
+          <div className="md-row-2">
+            <div className="md-field-group">
+              <label className="md-field-label">Validade</label>
+              <input
+                type="text"
+                className="md-field-input"
+                value={cardForm.expiry}
+                onChange={(e) =>
+                  setCardForm((p) => ({
+                    ...p,
+                    expiry: formatExpiry(e.target.value),
+                  }))
+                }
+                placeholder="MM/AA"
+                maxLength={5}
+              />
             </div>
-            {cardFormError && (
-              <div className="md-field-error">{cardFormError}</div>
-            )}
-            <div className="md-profile-section-footer">
-              <button
-                type="button"
-                className="md-details-secondary"
-                onClick={() => {
-                  setCardFormError("");
-                  setActiveView("payments");
-                }}
-              >
-                Cancelar
-              </button>
-              <button type="submit" className="md-primary-button">
-                Salvar cartão
-              </button>
+            <div className="md-field-group">
+              <label className="md-field-label">CVV</label>
+              <input
+                type="text"
+                className="md-field-input"
+                value={cardForm.cvv}
+                onChange={(e) =>
+                  setCardForm((p) => ({
+                    ...p,
+                    cvv: onlyDigits(e.target.value).slice(0, 4),
+                  }))
+                }
+                placeholder="123"
+                maxLength={4}
+              />
             </div>
-          </form>
-        </div>
+          </div>
+          {cardFormError && (
+            <div className="md-field-error">{cardFormError}</div>
+          )}
+          <div className="md-profile-section-footer">
+            <button type="submit" className="md-primary-button">
+              Salvar cartão
+            </button>
+            <button
+              type="button"
+              className="md-details-secondary"
+              onClick={() => setActiveView("payments")}
+            >
+              Cancelar
+            </button>
+          </div>
+        </form>
       );
     }
 
@@ -1129,9 +1114,9 @@ function ProfileScreen({
               id="settings-currency"
               value={settingsForm.currency}
               options={[
-                { value: "BRL - Real brasileiro", label: t("curr_brl") },
-                { value: "USD - Dólar americano", label: t("curr_usd") },
-                { value: "EUR - Euro", label: t("curr_eur") },
+                { value: "BRL - Real brasileiro", label: "BRL - Real brasileiro" },
+                { value: "USD - Dólar americano", label: "USD - Dólar americano" },
+                { value: "EUR - Euro", label: "EUR - Euro" },
               ]}
               onChange={(event) =>
                 handleSettingsChange("currency", event.target.value)
@@ -1146,9 +1131,9 @@ function ProfileScreen({
               id="settings-theme"
               value={settingsForm.theme}
               options={[
-                { value: "Claro", label: t("theme_light") },
-                { value: "Escuro", label: t("theme_dark") },
-                { value: "Automático", label: t("theme_auto") },
+                { value: "Claro", label: "Claro" },
+                { value: "Escuro", label: "Escuro" },
+                { value: "Sistema", label: "Sistema" },
               ]}
               onChange={(event) =>
                 handleSettingsChange("theme", event.target.value)
@@ -1164,7 +1149,9 @@ function ProfileScreen({
         <div className="md-profile-section-card">
           <div className="md-profile-section-header">
             <div>
-              <div className="md-profile-section-title">{t("notifications_title")}</div>
+              <div className="md-profile-section-title">
+                {t("notifications_title")}
+              </div>
               <div className="md-profile-section-subtitle">
                 {t("notifications_subtitle")}
               </div>
@@ -1179,10 +1166,19 @@ function ProfileScreen({
                     <span className="md-toggle-content">{t("notifications_email")}</span>
                     <input
                       type="checkbox"
+                      className="md-toggle-input"
                       checked={settingsForm.notifications.email}
-                      onChange={() => handleNotificationToggle("email")}
+                      onChange={(e) =>
+                        setSettingsForm((prev) => ({
+                          ...prev,
+                          notifications: {
+                            ...prev.notifications,
+                            email: e.target.checked,
+                          },
+                        }))
+                      }
                     />
-                    <div className="md-toggle-switch"></div>
+                    <div className="md-toggle-slider"></div>
                   </label>
                   <label className="md-toggle-row">
                     <div className="md-toggle-icon">
@@ -1191,10 +1187,19 @@ function ProfileScreen({
                     <span className="md-toggle-content">{t("notifications_sms")}</span>
                     <input
                       type="checkbox"
+                      className="md-toggle-input"
                       checked={settingsForm.notifications.sms}
-                      onChange={() => handleNotificationToggle("sms")}
+                      onChange={(e) =>
+                        setSettingsForm((prev) => ({
+                          ...prev,
+                          notifications: {
+                            ...prev.notifications,
+                            sms: e.target.checked,
+                          },
+                        }))
+                      }
                     />
-                    <div className="md-toggle-switch"></div>
+                    <div className="md-toggle-slider"></div>
                   </label>
                   <label className="md-toggle-row">
                     <div className="md-toggle-icon">
@@ -1203,13 +1208,22 @@ function ProfileScreen({
                     <span className="md-toggle-content">{t("notifications_push")}</span>
                     <input
                       type="checkbox"
+                      className="md-toggle-input"
                       checked={settingsForm.notifications.push}
-                      onChange={() => handleNotificationToggle("push")}
+                      onChange={(e) =>
+                        setSettingsForm((prev) => ({
+                          ...prev,
+                          notifications: {
+                            ...prev.notifications,
+                            push: e.target.checked,
+                          },
+                        }))
+                      }
                     />
-                    <div className="md-toggle-switch"></div>
+                    <div className="md-toggle-slider"></div>
                   </label>
                 </div>
-              </div>
+          </div>
         </div>
       );
     }
@@ -1398,39 +1412,31 @@ function ProfileScreen({
 
   return (
     <section className="md-section">
-      <div className="md-profile-card">
-        <div className="md-profile-header">
-          <ProfileAvatar user={user} initials={initials} />
-          <div style={{ flex: 1 }}>
-            <div className="md-profile-name-row">
-              <div className="md-profile-name">{user.name}</div>
-              <button
-                type="button"
-                className="md-profile-edit-button"
-                onClick={() => handleOpenView("account")}
-              >
-                <span className="md-profile-edit-icon">
-                  <IconEdit width={14} height={14} />
-                </span>
-                <span>{t("profile_edit")}</span>
-              </button>
-            </div>
-            <div className="md-profile-email">{user.email}</div>
-            <div className="md-profile-status-row">
-              <span className="md-profile-status-dot" />
-              <span className="md-profile-status-label">{t("profile_verified")}</span>
+      <div className="md-profile-container">
+        <div className="md-profile-sidebar">
+          <div className="md-profile-header">
+            <ProfileAvatar user={user} initials={initials} />
+            <div className="md-profile-info">
+              <h2 className="md-profile-name">
+                {user?.name || "Visitante"}
+              </h2>
+              <p className="md-profile-email">{user?.email}</p>
             </div>
           </div>
-        </div>
-        <div className="md-profile-meta">
-          <span>
-            <IconBriefcase width={16} height={16} style={{ marginRight: 6 }} />
-            {reservationsCount} {t("profile_stats_trips")}
+          <span className="md-mobile-only">
+            {activeView === "menu" ? null : (
+              <button
+                type="button"
+                className="md-profile-back-button"
+                onClick={handleBackToMenu}
+                style={{ marginBottom: 16 }}
+              >
+                <IconArrowLeft width={20} height={20} /> Voltar
+              </button>
+            )}
           </span>
-          <span style={{ margin: "0 8px", opacity: 0.3 }}>|</span>
-          <span>
-            <IconHeart width={16} height={16} style={{ marginRight: 6 }} />
-            {favoritesCount} {t("profile_stats_favorites")}
+          <span className="md-desktop-only">
+            {renderMenu()}
           </span>
         </div>
         <div

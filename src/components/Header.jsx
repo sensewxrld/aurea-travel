@@ -1,8 +1,18 @@
 import React from "react";
 import { Link } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
 import logo from "../assets/logo-aurea.png";
 
-function Header({ user, onClientAreaClick }) {
+function Header({ onClientAreaClick }) {
+  const { currentUser } = useAuth();
+  
+  // Create a user object compatible with the existing rendering logic if needed,
+  // or update the rendering logic to use currentUser directly.
+  const user = currentUser ? {
+    name: currentUser.displayName || currentUser.email.split('@')[0],
+    ...currentUser
+  } : null;
+
   return (
     <header className="md-header">
       <div className="md-header-inner">

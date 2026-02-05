@@ -1,26 +1,47 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { auth } from "../services/firebase";
+import { useAuth } from "../contexts/AuthContext";
 
-function LoginScreen({ user, onLogin }) {
+function LoginScreen() {
   const navigate = useNavigate();
-  const [identifier, setIdentifier] = useState("");
+  const { currentUser } = useAuth();
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    if (user) {
+    if (currentUser) {
       navigate("/perfil");
     }
-  }, [user, navigate]);
+  }, [currentUser, navigate]);
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
-    if (!identifier.trim()) return;
+    if (!email.trim() || !password.trim()) return;
+    
     setIsSubmitting(true);
-    setTimeout(() => {
-      onLogin({ identifier, password });
+    setError("");
+
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      // Navigation will happen in useEffect when currentUser updates
+    } catch (err) {
+      console.error(err);
+      if (err.code === 'auth/invalid-credential') {
+        setError("Email ou senha incorretos.");
+      } else if (err.code === 'auth/user-not-found') {
+        setError("Usuário não encontrado.");
+      } else if (err.code === 'auth/wrong-password') {
+        setError("Senha incorreta.");
+      } else {
+        setError("Falha ao entrar. Tente novamente.");
+      }
+    } finally {
       setIsSubmitting(false);
-    }, 400);
+    }
   };
 
   return (
@@ -35,18 +56,20 @@ function LoginScreen({ user, onLogin }) {
       </div>
       <div className="md-auth-card">
         <form onSubmit={handleSubmit} className="md-auth-form">
+          {error && <div className="md-alert-error" style={{marginBottom: '1rem', color: 'var(--md-color-error)'}}>{error}</div>}
           <div className="md-field-group">
-            <label className="md-field-label" htmlFor="login-identifier">
-              Email ou telefone
+            <label className="md-field-label" htmlFor="login-email">
+              Email
             </label>
             <input
-              id="login-identifier"
+              id="login-email"
               className="md-field-input"
-              type="text"
-              placeholder="voce@exemplo.com ou (11) 99999-9999"
-              value={identifier}
-              onChange={(event) => setIdentifier(event.target.value)}
+              type="email"
+              placeholder="voce@exemplo.com"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
               autoComplete="username"
+              required
             />
           </div>
           <div className="md-field-group">
@@ -61,19 +84,17 @@ function LoginScreen({ user, onLogin }) {
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               autoComplete="current-password"
+              required
             />
           </div>
           <button
             type="submit"
             className="md-primary-button md-auth-submit"
-            disabled={isSubmitting || !identifier.trim()}
+            disabled={isSubmitting || !email.trim() || !password.trim()}
           >
-            <span>Entrar</span>
+            <span>{isSubmitting ? "Entrando..." : "Entrar"}</span>
           </button>
         </form>
-        <div className="md-auth-hint">
-          Login simulado, sem envio de dados para servidores externos.
-        </div>
         <div className="md-auth-hint">
           Ainda não tem conta?{" "}
           <button
