@@ -13,7 +13,13 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
+
+// Initialize analytics only in production to avoid AdBlock errors in dev
+let analytics = null;
+if (import.meta.env.PROD) {
+  analytics = getAnalytics(app);
+}
+
 const auth = getAuth(app);
 
 export { app, analytics, auth };
