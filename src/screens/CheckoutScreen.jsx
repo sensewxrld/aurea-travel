@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import CustomSelect from "../components/CustomSelect.jsx";
+import { calculateTotalPrice } from "../utils/pricing";
 
 const monthNames = [
   "Janeiro",
@@ -109,6 +110,12 @@ function CheckoutScreen({ onConfirmReservation }) {
   const [cardExpiryError, setCardExpiryError] = useState("");
   const [cardCvvError, setCardCvvError] = useState("");
   const [pixNameError, setPixNameError] = useState("");
+  const [datesError, setDatesError] = useState("");
+  
+  const totalPrice = useMemo(() => {
+    if (!destination.price) return { totalFormatted: "R$ 0", total: 0 };
+    return calculateTotalPrice(destination.price, people.adults, people.children);
+  }, [destination.price, people]);
 
   const initialReferenceDate = parseIsoDate(dateStart) || new Date();
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
@@ -296,7 +303,7 @@ function CheckoutScreen({ onConfirmReservation }) {
     const reservationPayload = {
       destinationId: destination.id,
       destinationName: destination.name,
-      price: destination.price,
+      price: totalPrice.totalFormatted,
       dates: datesDisplay || "Datas a definir",
       date_start: dateStart || null,
       date_end: dateEnd || null,
@@ -339,7 +346,7 @@ function CheckoutScreen({ onConfirmReservation }) {
             </div>
             {destination.price && (
               <div className="md-checkout-price">
-                <div className="md-checkout-price-total">{destination.price}</div>
+                <div className="md-checkout-price-total">{totalPrice.totalFormatted}</div>
                 <div className="md-checkout-price-people">
                   Total para {people.adults + people.children} {people.adults + people.children === 1 ? 'pessoa' : 'pessoas'}
                 </div>
